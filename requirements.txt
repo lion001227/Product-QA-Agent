@@ -1,0 +1,9 @@
+streamlit~=1.60.0
+openai~=2.51.0
+python-dotenv~=1.2.2
+modelscope~=1.39.1
+langchain-community~=0.4.2
+langchain-openai~=1.4.1
+langchain-core~=1.5.3
+langchain-text-splitters~=1.1.2
+scipy~=1.18.0

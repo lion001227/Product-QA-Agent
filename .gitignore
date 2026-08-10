@@ -1,0 +1,16 @@
+# Python虚拟环境
+.venv/
+venv/
+
+# PyCharm
+.idea/
+
+# Python缓存
+__pycache__/
+*.py[cod]
+
+.env
+vector_db/
+data/*.pdf
+1.py
+
