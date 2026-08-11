@@ -19,7 +19,7 @@ import os
 
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
-from rag import chain
+from agent.agent import ask_agent
 
 st.set_page_config(
     page_title="交易所文档QA助手",
@@ -53,17 +53,7 @@ if question := st.chat_input("请输入您的问题..."):
     with st.chat_message("assistant"):
         with st.spinner("思考中..."):
             try:
-                result = chain.invoke({
-                    "question": question,
-                    "history": []
-                },
-                config={
-                    "configurable": {
-                        "session_id": "default_user"
-                    }
-                }
-                )
-                answer = result.content
+                answer = ask_agent(question)
             except Exception as e:
                 answer = f"❌ 处理请求时出错：{str(e)}"
 

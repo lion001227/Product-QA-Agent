@@ -59,17 +59,6 @@ llm = ChatOpenAI(
 
 )
 
-#rag chain
-prompt=ChatPromptTemplate.from_messages([
-
-    ("system","""你现在是一名金融领域的专家，根据资料回答问题.请注意：
-    1.如果资料中涉及到表格，请确保读到完整的表格，有些表格是跨页的
-    2.如果多个文档块包含相关信息，请综合所有信息给出完整答案
-    3.如果资料中没有答案，明确说不知道"""),
-    MessagesPlaceholder(variable_name="history"),#自动处理历史消息
-    ("human","资料:{context},当前问题:{question}")
-   ] )
-
 #创建历史记录存储,保存不同用户的聊天记录。
 store={}
 def get_session_history(session_id:str):
@@ -100,16 +89,38 @@ def dedup_context(question):
             unique.append(doc)
     return unique
 
+#rag chain
+def create_rag_chain(question):
+    prompt=ChatPromptTemplate.from_messages([
 
-rag_chain=(
-    {
-    "context":lambda x:dedup_context(x),
-    "question":lambda x:get_question(x),
-    "history":lambda x:x["history"]
-}|prompt|llm
-)
+        ("system","""你现在是一名金融领域的专家，根据资料回答问题.请注意：
+        1.如果资料中涉及到表格，请确保读到完整的表格，有些表格是跨页的
+        2.如果多个文档块包含相关信息，请综合所有信息给出完整答案
+        3.如果资料中没有答案，明确说不知道"""),
+        MessagesPlaceholder(variable_name="history"),#自动处理历史消息
+        ("human","资料:{context},当前问题:{question}")
+       ] )
 
-chain=RunnableWithMessageHistory(rag_chain,get_session_history,input_messages_key="question",history_messages_key="history")
+
+    rag_chain=(
+        {
+        "context":lambda x:dedup_context(x),
+        "question":lambda x:get_question(x),
+        "history":lambda x:x["history"]
+    }|prompt|llm
+    )
+
+    chain=RunnableWithMessageHistory(rag_chain,get_session_history,input_messages_key="question",history_messages_key="history")
+    return chain
+
+def rag_qa(question):
+    """RAG问答函数，直接返回答案字符串"""
+    chain=create_rag_chain(question)
+    result=chain.invoke(
+        {"question":question},
+        config={"configurable":{"session_id":"default_user"}}
+    )
+    return result.content
 
 # answer=chain.invoke( {"question": "目前支持互联网交易平台的哪些业务？"},
 #     config={"configurable": {"session_id": "default_user"}} )
