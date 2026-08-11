@@ -42,7 +42,7 @@ for pdf in pdf_files:
 #print(documents[0].page_content[:500])
 
 #切割文本知识块
-slipper=RecursiveCharacterTextSplitter(chunk_size=500,chunk_overlap=100) #每个文本块最大长度=500，相邻两块之间重叠的字符数=100
+slipper=RecursiveCharacterTextSplitter(chunk_size=6000,chunk_overlap=500) #每个文本块最大长度=6000，相邻两块之间重叠的字符数=500
 
 chunks=slipper.split_documents(all_documents)
 

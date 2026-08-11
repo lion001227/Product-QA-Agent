@@ -16,8 +16,11 @@ RAG 接口文档数据处理与 LLM 连接模块
 from langchain_chroma import Chroma
 from langchain_community.embeddings import HuggingFaceBgeEmbeddings
 from langchain_openai import ChatOpenAI
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.runnables import RunnablePassthrough
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+#加入memory模块
+from langchain_core.chat_history import InMemoryChatMessageHistory
+from langchain_core.runnables.history import RunnableWithMessageHistory
+
 import os
 from dotenv import load_dotenv
 
@@ -35,7 +38,17 @@ embeddings = HuggingFaceBgeEmbeddings(
 
 vectorstore=Chroma(persist_directory=VECTOR_DB_PATH,embedding_function=embeddings)
 
-retriever=vectorstore.as_retriever(search_kwargs={"k":4}) #从向量数据库中找出与用户问题最相似的 4 个文本块，并返回
+#使用MMR检索增加多样性
+retriever=vectorstore.as_retriever(
+    search_type="mmr",
+    search_kwargs={
+        "k":20,
+        "fetch_k":20,
+        "lambda_mult":0.5
+    }
+) #从向量数据库中找出与用户问题最相似的 20 个文本块，并返回
+
+
 
 #连接大模型
 llm = ChatOpenAI(
@@ -47,18 +60,58 @@ llm = ChatOpenAI(
 )
 
 #rag chain
-prompt=ChatPromptTemplate.from_template(
-   """
-   你现在是一名金融领域的专家，根据以下资料回答：{context}，问题：{question}
-   """ )
+prompt=ChatPromptTemplate.from_messages([
 
-chain=(
+    ("system","""你现在是一名金融领域的专家，根据资料回答问题.请注意：
+    1.如果资料中涉及到表格，请确保读到完整的表格，有些表格是跨页的
+    2.如果多个文档块包含相关信息，请综合所有信息给出完整答案
+    3.如果资料中没有答案，明确说不知道"""),
+    MessagesPlaceholder(variable_name="history"),#自动处理历史消息
+    ("human","资料:{context},当前问题:{question}")
+   ] )
+
+#创建历史记录存储,保存不同用户的聊天记录。
+store={}
+def get_session_history(session_id:str):
+    if session_id not in store:
+        store[session_id]=InMemoryChatMessageHistory()
+    return store[session_id]
+
+#文本提取
+def get_question(x):
+
+    print("进入get_question:", x)
+    if isinstance(x, dict):
+        return x.get("question","")
+    elif isinstance(x, str):
+        return x
+    else:
+        return str(x)
+
+#去重函数：
+def dedup_context(question):
+    docs=retriever.invoke(get_question(question))
+    seen=set()
+    unique=[]
+    for doc in docs:
+        key=doc.page_content[:80]
+        if key not in seen:
+            seen.add(key)
+            unique.append(doc)
+    return unique
+
+
+rag_chain=(
     {
-    "context":retriever,
-    "question":RunnablePassthrough()
+    "context":lambda x:dedup_context(x),
+    "question":lambda x:get_question(x),
+    "history":lambda x:x["history"]
 }|prompt|llm
 )
 
-# answer=chain.invoke("目前支持互联网交易平台的哪些业务？")
+chain=RunnableWithMessageHistory(rag_chain,get_session_history,input_messages_key="question",history_messages_key="history")
+
+# answer=chain.invoke( {"question": "目前支持互联网交易平台的哪些业务？"},
+#     config={"configurable": {"session_id": "default_user"}} )
 # print(answer.content)
 
