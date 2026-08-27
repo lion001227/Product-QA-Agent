@@ -1,27 +1,25 @@
 # Exchange-Docs-QA-Agent
 
-基于 **LangChain + Chroma + RAG + Agent + Memory + Large Language Model（LLM）** 构建的交易所文档知识库智能问答助手。
+基于 **LangChain + LangGraph + Chroma + RAG + Agent + Memory + DeepSeek LLM** 构建的交易所文档知识库智能问答助手。
 
 本项目面向**交易所相关文档知识库**，通过 **RAG（Retrieval Augmented Generation，检索增强生成）** 将大语言模型与交易所文档结合，提高专业问题回答的准确性并减少模型幻觉。
 
-在基础 RAG 问答的基础上，项目进一步加入了 **Agent、Tools 和 Memory**，实现智能工具调用以及多轮对话能力。
-
-项目当前处于持续迭代阶段，目标是从基础的 RAG 问答系统逐步升级为具备**交易所知识库检索、Agent 智能决策、工具调用、多轮对话和 Web 交互能力的 AI Agent 应用**。
+在基础 RAG 问答之上，项目进一步加入了 **Agent、Tools 和 Memory**：Agent 不仅能检索本地知识库，还能实时调用上交所 / 深交所官网接口查询最新公告，并支持多轮对话与"回答来源溯源"。
 
 ---
 
 ## 项目介绍
 
-传统大语言模型无法直接了解特定交易所文档中的专业内容，例如交易规则、业务规定、产品规则及其他文档信息。
+传统大语言模型无法直接了解特定交易所文档中的专业内容，例如交易规则、业务规定、产品规则及其他文档信息，也无法获取交易所官网的实时公告。
 
 如果直接依赖 LLM 本身的知识进行回答，可能出现：
 
 - 文档内容缺失
 - 专业信息不准确
 - 模型幻觉
-- 无法根据最新文档回答问题
+- 无法回答最新公告 / 最新文档相关问题
 
-因此，本项目使用 RAG 将交易所文档知识库与 LLM 结合。
+因此，本项目使用 RAG 将交易所文档知识库与 LLM 结合，并通过 Agent + Tools 让模型具备**按需检索本地知识库**和**按需查询实时公告**两种能力。
 
 基础 RAG 流程：
 
@@ -30,33 +28,29 @@
     ↓
 问题向量化 Embedding
     ↓
-Chroma 向量数据库检索
+Chroma 向量数据库检索（MMR，兼顾相关性与多样性）
     ↓
-召回相关文档片段
+召回相关文档片段（去重）
     ↓
 结合 Prompt 构造上下文
     ↓
 LLM 生成最终答案
 ```
 
-加入 Agent 和 Memory 后，整体流程进一步扩展为：
+加入 Agent、Tools 和 Memory 后，整体流程扩展为：
 
 ```text
 用户问题
     ↓
-Memory 读取历史对话
+Agent（携带历史对话，理解上下文指代）
     ↓
-Agent 分析用户需求
+判断问题类型，选择 Tool
+    ├── 文档内容问题 → profile_search → RAG 检索 → LLM 生成答案
+    ├── 溯源类问题   → return_document_sources → 返回原文/文件名/页码
+    ├── 上交所公告   → sse_latest_announcements → 实时抓取官网数据
+    └── 深交所公告   → szse_latest_announcements → 实时抓取官网数据
     ↓
-选择并调用 Tool
-    ↓
-RAG Tool
-    ↓
-Chroma 检索交易所相关文档
-    ↓
-LLM 根据检索结果生成答案
-    ↓
-Memory 保存本轮对话
+LangGraph Checkpointer（按 thread_id）保存本轮对话
     ↓
 返回最终回答
 ```
@@ -67,31 +61,30 @@ Memory 保存本轮对话
 
 ### 已实现
 
-- ✅ PDF 文档加载
-- ✅ 文档文本切分
-- ✅ Embedding 向量化
-- ✅ Chroma 向量数据库
-- ✅ 相似度检索
-- ✅ RAG 问答
-- ✅ DeepSeek / OpenAI 兼容 LLM 调用
+- ✅ 多格式文档加载（PDF / TXT / CSV / DOCX）
+- ✅ 文档文本切分（Chunk Size 500，Overlap 100）
+- ✅ 本地 BGE 模型 Embedding 向量化
+- ✅ Chroma 向量数据库持久化
+- ✅ MMR 相似度检索（兼顾相关性与多样性）+ 检索结果去重
+- ✅ RAG 问答（DeepSeek / OpenAI 兼容 LLM）
+- ✅ **回答来源溯源**（文件名、页码、原文片段，逐字保留输出）
 - ✅ Streamlit Web 问答界面
-- ✅ Agent 模块
-- ✅ Tools 工具模块
-- ✅ 将 RAG 能力封装为 Agent 可调用的 Tool
-- ✅ Memory 对话记忆
-- ✅ 用户聊天记录保存
-- ✅ 历史消息管理
-- ✅ 多轮连续对话
+- ✅ Agent 模块（`create_agent`）+ 明确的工具调用规则（System Prompt）
+- ✅ Tools 工具模块：
+  - RAG 知识库检索工具
+  - 文档来源溯源工具
+  - **上交所最新公告实时查询**
+  - **深交所最新公告实时查询**
+- ✅ 基于 LangGraph `InMemorySaver` 的多轮对话记忆（按会话 `thread_id` 区分）
+- ✅ Streamlit 会话级聊天记录展示与"清空对话"功能
 
 ### 后续计划
 
-- ⏳ 增加更多 Agent Tools
-- ⏳ 检索结果来源引用
-- ⏳ RAG 检索效果优化
-- ⏳ Agent Prompt 优化
-- ⏳ Tool Description 优化
+- ⏳ 增加更多 Agent Tools（如财报查询、计算器等）
+- ⏳ RAG 检索效果优化（Rerank、Query Rewrite、混合检索）
+- ⏳ 持久化 Memory（当前为内存态，重启后丢失）
 - ⏳ 用户反馈机制
-- ⏳ 项目部署上线
+- ⏳ 项目部署上线（Docker / 云服务器）
 
 ---
 
@@ -102,13 +95,16 @@ Memory 保存本轮对话
 | Python | 项目主要开发语言 |
 | LangChain | LLM、RAG、Agent 应用开发框架 |
 | LangChain-Chroma | LangChain 与 Chroma 集成 |
+| LangChain-HuggingFace / langchain_community.embeddings | BGE 本地模型接入 |
+| LangGraph | Agent 运行时与多轮对话 Memory（`InMemorySaver`） |
 | Chroma | 向量数据库 |
-| OpenAI Embeddings | 文本向量化 |
-| DeepSeek | LLM 推理与文本生成 |
+| BGE（本地模型） | 文本向量化 Embedding |
+| DeepSeek（OpenAI 兼容 API） | LLM 推理与文本生成 |
 | Streamlit | Web 交互界面 |
+| Requests | 调用上交所 / 深交所官网公告接口 |
 | python-dotenv | 环境变量管理 |
-| PDF Loader | 交易所 PDF 文档加载 |
-| Text Splitter | 文档文本切分 |
+| PyPDFLoader / Docx2txtLoader / TextLoader / CSVLoader | 多格式文档加载 |
+| RecursiveCharacterTextSplitter | 文档文本切分 |
 
 ---
 
@@ -120,388 +116,220 @@ Exchange-Docs-QA-Agent/
 ├── agent/
 │   ├── __init__.py
 │   ├── agent.py
-│   │   └── Agent 核心逻辑
+│   │   └── Agent 核心逻辑：create_agent、System Prompt、ask_agent()
 │   └── tools.py
-│       └── Agent 可调用工具
+│       └── Agent 可调用工具：profile_search / return_document_sources /
+│           sse_latest_announcements / szse_latest_announcements
 │
 ├── data/
-│   └── 交易所知识库文档(PDF)
+│   └── 交易所知识库文档（PDF / TXT / CSV / DOCX）
 │
 ├── vector_db/
-│   └── Chroma 向量数据库
+│   └── Chroma 向量数据库（由 invest.py 生成，勿手动修改）
 │
-├── ingest.py
+├── invest.py
 │   └── 文档加载、文本切分、Embedding、向量数据库构建
 │
 ├── rag.py
-│   └── RAG 检索、问答及 Memory 相关逻辑
+│   └── RAG 检索、Prompt 构造、LLM 问答、来源溯源逻辑
+│       （注意：需放在项目根目录，agent/tools.py 会以
+│        `from rag import rag_qa` 的绝对导入方式引用它）
 │
 ├── app.py
-│   └── Streamlit Web 应用入口
+│   └── Streamlit Web 应用入口，调用 agent.agent.ask_agent()
 │
 ├── .env
-│   └── API Key、模型及路径等环境变量
+│   └── API Key、模型路径等环境变量
 │
 ├── .gitignore
 ├── requirements.txt
 └── README.md
 ```
 
-> 当前 Memory 功能直接实现于 `rag.py` 模块中，因此项目没有单独的 `memory/` 目录。
+> ⚠️ **模块位置提醒**：`rag.py` 必须放在项目根目录（与 `app.py`、`invest.py` 同级），而不是放进 `agent/` 包内，否则 `agent/tools.py` 中的 `from rag import rag_qa` / `from rag import search_document_sources` 会导入失败。
+
+> Memory 当前通过 LangGraph 的 `InMemorySaver` 实现，直接集成在 `agent/agent.py` 中，按 `thread_id` 区分不同会话，因此项目没有单独的 `memory/` 目录。
 
 ---
 
-# 系统架构
-
-当前项目可以理解为以下几个核心模块：
+## 系统架构
 
 ```text
                     ┌─────────────────────┐
-                    │      Streamlit      │
-                    │        app.py       │
-                    └──────────┬──────────┘
-                               │
+                    │      Streamlit       │
+                    │        app.py        │
+                    └──────────┬───────────┘
+                               │ ask_agent(question, thread_id)
                                ↓
                     ┌─────────────────────┐
-                    │       Agent         │
-                    │     agent.py        │
-                    └──────────┬──────────┘
-                               │
+                    │        Agent         │
+                    │   agent/agent.py     │
+                    │  (create_agent +     │
+                    │   InMemorySaver)     │
+                    └──────────┬───────────┘
+                               │ 按需选择工具调用
                                ↓
                     ┌─────────────────────┐
-                    │       Tools         │
-                    │     tools.py        │
-                    └──────────┬──────────┘
-                               │
-                               ↓
-                    ┌─────────────────────┐
-                    │     RAG + Memory    │
-                    │       rag.py        │
-                    └──────────┬──────────┘
-                               │
-                     ┌─────────┴─────────┐
-                     ↓                   ↓
-              ┌─────────────┐     ┌─────────────┐
-              │   Chroma    │     │  Chat LLM   │
-              │ vector_db/  │     │ DeepSeek    │
-              └──────┬──────┘     └─────────────┘
-                     │
-                     ↓
-              ┌─────────────┐
-              │ 交易所文档知识库 │
-              │    data/     │
-              └─────────────┘
+                    │        Tools         │
+                    │   agent/tools.py     │
+                    └──────────┬───────────┘
+              ┌────────────────┼──────────────────────┐
+              ↓                ↓                       ↓
+      ┌───────────────┐ ┌──────────────┐      ┌──────────────────┐
+      │ profile_search │ │ return_docume│      │ sse / szse       │
+      │  return_docume-│ │ nt_sources   │      │ latest_          │
+      │  nt_sources    │ │              │      │ announcements    │
+      └───────┬────────┘ └──────┬───────┘      └─────────┬────────┘
+              │                 │                          │
+              ↓                 ↓                          ↓
+      ┌───────────────────────────────┐          ┌──────────────────┐
+      │           rag.py              │          │ 上交所 / 深交所    │
+      │  Retriever(MMR) + LLM         │          │  官网公告接口      │
+      └───────────────┬───────────────┘          │（实时 HTTP 请求）│
+                       │                          └──────────────────┘
+                       ↓
+              ┌─────────────────┐
+              │     Chroma      │
+              │   vector_db/    │
+              └────────┬────────┘
+                       │
+                       ↓
+              ┌─────────────────┐
+              │ 交易所文档知识库  │
+              │      data/       │
+              │ （由 invest.py   │
+              │   构建索引）      │
+              └─────────────────┘
 ```
 
 ---
 
 # RAG 模块
 
-RAG 是本项目的核心知识库能力。
+## `invest.py`（文档向量化）
 
-## RAG 工作流程
+负责构建交易所文档知识库：
 
-```text
-交易所 PDF 文档
-      ↓
-Document Loader
-      ↓
-文本切分
-      ↓
-Embedding
-      ↓
-Chroma Vector Database
-      ↓
-用户问题
-      ↓
-Retriever
-      ↓
-召回相关文档 Chunk
-      ↓
-Prompt + Context
-      ↓
-LLM
-      ↓
-最终回答
-```
-
----
-
-## `ingest.py`
-
-`ingest.py` 负责构建交易所文档知识库：
-
-1. 加载交易所 PDF 文档
-2. 将文档转换为 LangChain Document
-3. 对文档进行 Chunk 切分
-4. 使用 Embedding 模型生成向量
-5. 将向量写入 Chroma
+1. 遍历 `data/` 目录，按后缀名（`.pdf` / `.txt` / `.csv` / `.docx`）自动选择对应的 Loader
+2. 使用 `RecursiveCharacterTextSplitter` 切分文本（`chunk_size=500`，`chunk_overlap=100`）
+3. 使用本地 BGE 模型（`langchain_huggingface.HuggingFaceEmbeddings`，开启 `normalize_embeddings=True`）生成向量
+4. 写入 Chroma，持久化到 `<项目根目录>/vector_db`
 
 运行：
 
 ```bash
-python ingest.py
+python invest.py
 ```
 
-完成后生成本地向量数据库。
-
-如果新增或修改了知识库文档，需要重新执行知识库构建流程。
+如果新增或修改了知识库文档，需要重新执行该脚本以重建向量库。
 
 ---
 
-## `rag.py`
+## `rag.py`（检索与问答）
 
-`rag.py` 是当前项目的核心模块之一，同时承担 **RAG 和 Memory** 相关逻辑。
+`rag.py` 是知识库检索与问答的核心模块，主要负责：
 
-主要负责：
+- 加载已持久化的 Chroma 向量库（`langchain_community.embeddings.HuggingFaceBgeEmbeddings` 加载同一本地 BGE 模型）
+- 基于 **MMR（最大边际相关性）** 创建 Retriever：`k=5`、`fetch_k=20`、`lambda_mult=0.5`，兼顾相关性与结果多样性
+- `dedup_context()`：对检索结果按内容前 80 字符去重，避免重复片段污染上下文
+- `format_docs()` + `ChatPromptTemplate`：构造带金融专家人设的 Prompt（要求完整读取跨页表格、综合多文档块信息、无答案时明确说不知道）
+- 调用 DeepSeek（`deepseek-chat`，`base_url=https://api.deepseek.com/v1`）生成回答
+- `rag_qa(question)`：对外提供的问答入口，返回纯文本答案
+- `search_document_sources(question, k=5)`：**来源溯源**能力，返回文件名、页码（PyPDFLoader 页码从 0 开始，已 +1 修正）及原文片段（截断至 300 字），并按"文件+页码+片段前缀"去重
 
-- 加载 Chroma 向量数据库
-- 创建 Retriever
-- 根据用户问题检索相关交易所文档
-- 构造 Prompt
-- 调用 LLM
-- 结合历史聊天记录进行上下文理解
-- 保存和管理用户聊天记录
-- 返回最终回答
-
-因此目前的模块关系是：
-
-```text
-rag.py
-├── RAG
-│   ├── Retriever
-│   ├── Chroma
-│   └── LLM
-│
-└── Memory
-    ├── 历史消息
-    └── 多轮上下文
-```
-
-后续如果项目进一步复杂化，可以再考虑将 RAG 和 Memory 拆分成独立模块。
-
-目前保持在 `rag.py` 中有利于项目结构简洁，也符合当前项目规模。
+> ⚠️ **已知不一致（建议后续统一）**：
+> `invest.py` 使用 `langchain_huggingface.HuggingFaceEmbeddings` 且开启了 `normalize_embeddings=True`；
+> `rag.py` 使用的是 `langchain_community.embeddings.HuggingFaceBgeEmbeddings`（该类在 LangChain 中已标记为过时用法），且未显式设置 `normalize_embeddings`。
+> 两处虽加载同一个 `MODEL_DIR` 模型，但构建索引与检索查询时的 Embedding 实现/参数不完全一致，理论上可能影响检索效果，建议后续统一为同一套 Embedding 封装与参数。
 
 ---
 
 # Agent 模块
 
-在基础 RAG 之上，项目新增 Agent 能力。
-
-## 传统 RAG
-
-传统 RAG 的流程比较固定：
-
-```text
-用户问题
-    ↓
-Retriever
-    ↓
-检索知识库
-    ↓
-LLM
-    ↓
-答案
-```
-
-## Agent + RAG
-
-加入 Agent 后：
-
-```text
-用户问题
-    ↓
-Agent
-    ↓
-分析用户需求
-    ↓
-决定是否调用 Tool
-    ↓
-调用 RAG Tool
-    ↓
-交易所文档知识库检索
-    ↓
-Agent 根据 Tool 返回结果生成答案
-```
-
-因此：
-
-> **Agent 负责决策和工具调用，RAG 负责知识库检索。**
-
-RAG 并没有被 Agent 替代，而是成为 Agent 可以调用的一项能力。
-
----
-
 ## `agent/agent.py`
 
 负责 Agent 的核心逻辑：
 
-- 创建 LLM
-- 创建 Agent
-- 注册 Tools
-- 配置 Agent System Prompt
-- 接收用户问题
-- 根据用户需求选择 Tool
-- 调用 Tool
-- 组织最终回答
-
-核心关系：
-
-```text
-用户
- ↓
-Agent
- ↓
-Tool
- ↓
-RAG
- ↓
-交易所知识库
-```
+- 创建 DeepSeek LLM（`ChatOpenAI`，`temperature=0.0`）
+- 注册工具列表：`profile_search`、`return_document_sources`、`sse_latest_announcements`、`szse_latest_announcements`
+- 使用 `langgraph.checkpoint.memory.InMemorySaver` 作为 Agent 的 Checkpointer，实现多轮对话记忆
+- 通过 `create_agent()` 组装 Agent，并配置详细的 **System Prompt 规则**，包括：
+  1. 结合历史对话，将有指代关系的问题改写为完整问题后再调用 `profile_search`
+  2. 用户询问"依据/来源/原文/第几页"时调用 `return_document_sources`，且**必须逐字原样输出**工具返回内容，不得改写、不得增删字段
+  3. 用户询问上交所 / 深交所最新公告时，根据用户明确指定的交易所调用对应工具，**不得混用两个交易所的结果**，且必须保留公告发布日期和官网链接，不得编造公告内容
+  4. 未检索到资料时不得编造信息
+- `ask_agent(question, thread_id)`：对外问答入口，相同 `thread_id` 代表同一段对话，LangGraph 会自动读取并延续历史上下文
 
 ---
 
 ## `agent/tools.py`
 
-`tools.py` 负责定义 Agent 可以使用的工具。
+定义 Agent 可调用的四个工具：
 
-当前最重要的工具是交易所知识库查询 Tool。
+| 工具 | 功能 | 触发场景 |
+|---|---|---|
+| `profile_search` | 调用 `rag.py` 的 `rag_qa`，检索交易所文档回答问题 | 用户咨询交易所文档相关内容 |
+| `return_document_sources` | 调用 `rag.py` 的 `search_document_sources`，返回文件名/页码/原文片段 | 用户询问"来源/依据/原文/第几页" |
+| `sse_latest_announcements` | 实时请求上交所官网公告接口，支持按股票代码 / 关键词本地筛选，最多返回 10 条 | 用户询问上交所最新公告 |
+| `szse_latest_announcements` | 实时请求深交所官网公告接口，支持按关键词筛选，最多返回 10 条 | 用户询问深交所最新公告 |
 
-其调用关系：
+其中上交所 / 深交所公告工具直接请求官网接口（非知识库数据），对返回的原始字段做了清洗（URL 补全为 `https`、时间戳格式化、按标题/公司代码/内容片段去重等）。
+
+调用关系：
 
 ```text
 Agent
- ↓
-RAG Tool
- ↓
-rag.py
- ↓
-Retriever
- ↓
-Chroma
- ↓
-交易所文档
-```
-
-这种设计方便后续扩展更多工具，例如：
-
-```text
-Tools
-├── exchange_qa
-│   └── 查询交易所知识库
-│
-├── calculator
-│   └── 数学计算
-│
-├── web_search
-│   └── 网络搜索
-│
-└── ...
+ ├── profile_search / return_document_sources
+ │        ↓
+ │      rag.py → Retriever(MMR) → Chroma → 交易所文档
+ │
+ └── sse_latest_announcements / szse_latest_announcements
+          ↓
+        上交所 / 深交所官网 HTTP 接口（实时数据，不经过向量库）
 ```
 
 ---
 
 # Memory 模块
 
-当前项目已经增加 Memory 能力，但 Memory **没有单独创建目录**，而是直接实现于：
+Memory 目前通过 **LangGraph 的 `InMemorySaver`** 实现，直接集成在 `agent/agent.py` 的 `create_agent()` 中，因此项目没有单独的 `memory/` 目录。
+
+- 每个 Streamlit 会话在 `st.session_state` 中生成一个唯一的 `thread_id`（`uuid.uuid4()`）
+- 相同 `thread_id` 的多次 `ask_agent()` 调用会被 LangGraph 自动识别为同一段对话，读取历史消息并在本轮结束后写回
+- 点击"清空对话"会重置聊天记录并生成新的 `thread_id`，开启全新会话
+- ⚠️ 当前为**进程内内存存储**，应用重启或多进程部署时历史记录会丢失，如需持久化需替换为其他 Checkpointer（如数据库、Redis 等）
+
+单轮 vs 多轮示例：
 
 ```text
-rag.py
-```
+【无 Memory】
+用户：某项交易规则是什么？          → AI：回答相关规则
+用户：它适用于哪些情况？            → AI：可能无法确定"它"指什么
 
-Memory 用于保存用户与 AI 的历史聊天记录，使系统具备多轮对话能力。
-
----
-
-## 单轮问答
-
-没有历史上下文时：
-
-```text
-用户：某项交易规则是什么？
-AI：回答相关规则。
-
-用户：它适用于哪些情况？
-AI：可能无法确定“它”具体指什么。
-```
-
----
-
-## 多轮对话
-
-加入 Memory 后：
-
-```text
-用户：某项交易规则是什么？
-AI：回答相关规则。
-
-用户：它适用于哪些情况？
-AI：结合上一轮对话理解“它”指代的交易规则，并继续回答。
-```
-
-因此 Memory 的作用是：
-
-> **保存历史消息，为 Agent / RAG 提供连续对话所需的上下文。**
-
----
-
-## Memory 工作流程
-
-```text
-用户当前问题
-      ↓
-读取历史聊天记录
-      ↓
-历史消息 + 当前问题
-      ↓
-Agent
-      ↓
-Tool / RAG
-      ↓
-LLM
-      ↓
-生成回答
-      ↓
-保存本轮对话
-```
-
-当前架构：
-
-```text
-app.py
-  ↓
-agent.py
-  ↓
-tools.py
-  ↓
-rag.py
-  ├── RAG
-  └── Memory
+【有 Memory，相同 thread_id】
+用户：某项交易规则是什么？          → AI：回答相关规则
+用户：它适用于哪些情况？            → AI：结合上一轮对话理解"它"，继续回答
 ```
 
 ---
 
 # Streamlit Web 界面
 
-项目使用 **Streamlit** 构建 Web 问答界面。
+`app.py` 提供基于 Streamlit 的问答界面，负责：
 
-推荐使用：
+- 用户问题输入（`st.chat_input`）
+- 用户 / AI 消息展示（`st.chat_message`）
+- 每个会话维护独立的聊天记录与 `thread_id`
+- 调用 `agent.agent.ask_agent()` 获取回答，并做基础异常捕获展示
+- 侧边栏提供助手说明及"清空对话"按钮（重置消息列表和 `thread_id`）
+
+启动：
 
 ```bash
 streamlit run app.py
 ```
 
-启动应用。
-
-当前 Web 界面负责：
-
-- 用户问题输入
-- 用户消息展示
-- AI 回答展示
-- Markdown 内容展示
-- 多轮聊天交互
-- 调用 Agent
-- 当前会话历史管理
+不要直接使用 `python app.py`，因为 `app.py` 是 Streamlit 应用入口，需要通过 `streamlit run` 启动。
 
 ---
 
@@ -521,6 +349,12 @@ Windows：
 .venv\Scripts\activate
 ```
 
+macOS / Linux：
+
+```bash
+source .venv/bin/activate
+```
+
 ## 3. 安装依赖
 
 ```bash
@@ -529,32 +363,25 @@ pip install -r requirements.txt
 
 ## 4. 配置 `.env`
 
-在项目根目录创建：
-
-```text
-.env
-```
-
-根据实际环境配置，例如：
+在项目根目录创建 `.env` 文件，包含：
 
 ```env
-OPENAI_API_KEY=your_api_key
-DB_DIR=D:\your\path\Exchange-Docs-QA-Agent\vector_db
+MODEL_DIR=/path/to/your/local/bge-model
+OPENAI_API_KEY=your_deepseek_api_key
 ```
 
-如果使用 DeepSeek 的 OpenAI 兼容 API，需要在代码中配置对应的 `base_url`：
+说明：
 
-```text
-https://api.deepseek.com/v1
-```
+- `MODEL_DIR`：BGE 本地嵌入模型所在路径（`invest.py` 和 `rag.py` 均需要）
+- `OPENAI_API_KEY`：实际用于访问 **DeepSeek** 服务（因为 DeepSeek 提供 OpenAI 兼容 API，`base_url` 已在代码中写死为 `https://api.deepseek.com/v1`）
 
-> `.env` 中可能包含 API Key 等敏感信息，因此不要提交到 GitHub。
+> `.env` 中可能包含 API Key 等敏感信息，请勿提交到 GitHub。
 
 ---
 
 # 构建知识库
 
-将交易所相关 PDF 文档放入：
+将交易所相关文档（PDF / TXT / CSV / DOCX）放入：
 
 ```text
 data/
@@ -563,46 +390,36 @@ data/
 然后执行：
 
 ```bash
-python ingest.py
+python invest.py
 ```
 
 程序完成：
 
 ```text
-PDF
+data/ 中的文档
  ↓
-Document Loader
+按后缀选择 Loader（PDF / TXT / CSV / DOCX）
  ↓
-Text Splitter
+RecursiveCharacterTextSplitter 切分
  ↓
-Embedding
+本地 BGE 模型 Embedding
  ↓
-Chroma
+Chroma 持久化
  ↓
 vector_db/
 ```
 
-如果修改或增加交易所知识库文档，需要重新构建向量数据库。
+如果修改或增加知识库文档，需要重新执行 `invest.py` 以重建向量数据库。
 
 ---
 
 # 启动应用
 
-推荐：
-
 ```bash
 streamlit run app.py
 ```
 
-启动后在浏览器中使用交易所文档知识库问答助手。
-
-不要直接使用：
-
-```bash
-python app.py
-```
-
-因为 `app.py` 是 Streamlit 应用入口。
+启动后在浏览器中使用交易所文档知识库问答助手，可直接提问文档相关内容、追问来源依据，或查询上交所 / 深交所最新公告。
 
 ---
 
@@ -652,200 +469,64 @@ vector_db/
 
 ## Version 1.0 —— 基础 RAG
 
-已完成：
-
-- [x] 交易所 PDF 知识库
-- [x] 文档加载
-- [x] 文本切分
-- [x] Embedding
+- [x] 交易所多格式文档知识库（PDF / TXT / CSV / DOCX）
+- [x] 文档加载与切分
+- [x] Embedding 向量化
 - [x] Chroma 向量数据库
-- [x] 相似度检索
-- [x] LLM 问答
-
----
+- [x] MMR 相似度检索
+- [x] LLM 问答（DeepSeek）
 
 ## Version 2.0 —— Web 问答界面
-
-已完成：
 
 - [x] Streamlit 聊天页面
 - [x] 用户输入框
 - [x] 用户 / AI 消息展示
-- [x] Markdown 回答展示
 - [x] 基础异常处理
 
----
+## Version 3.0 —— Agent 与 Tools
 
-## Version 3.0 —— 多轮对话 Memory
-
-已完成：
-
-- [x] Memory 能力
-- [x] 聊天记录保存
-- [x] 历史消息管理
-- [x] 上下文连续问答
-- [x] Memory 与 RAG 结合
-
----
-
-## Version 4.0 —— Agent
-
-当前阶段：
-
-- [x] Agent 模块
+- [x] Agent 模块（`create_agent`）
 - [x] Tools 模块
-- [x] RAG Tool
-- [x] Agent 调用 RAG
-- [x] Agent 与 Memory 结合
-- [ ] 增加更多 Tools
-- [ ] 优化 Agent System Prompt
-- [ ] 优化 Tool Description
-- [ ] 增加 Tool 调用过程展示
+- [x] RAG 检索工具（`profile_search`）
+- [x] 回答来源溯源工具（`return_document_sources`）
+- [x] 上交所 / 深交所实时公告查询工具
+- [x] Agent System Prompt 规则化（指代改写、来源原样输出、公告不混用）
 
----
+## Version 4.0 —— 多轮对话 Memory
 
-## Version 5.0 —— RAG 与 Agent 优化
+- [x] 基于 LangGraph `InMemorySaver` 的对话记忆
+- [x] 按 `thread_id` 区分会话
+- [x] Streamlit 会话级历史管理与清空功能
+- [ ] Memory 持久化（当前为进程内内存，重启即丢失）
 
-计划实现：
+## Version 5.0 —— RAG 与 Agent 优化（计划中）
 
-- [ ] 检索结果来源引用
-- [ ] RAG Top-K 优化
-- [ ] Chunk Size / Chunk Overlap 优化
 - [ ] Rerank
 - [ ] Query Rewrite
 - [ ] 混合检索
+- [ ] 统一 Embedding 实现与参数（解决 `invest.py` 与 `rag.py` 的不一致问题）
 - [ ] 检索结果质量评估
-- [ ] Agent Tool 选择优化
-- [ ] Hallucination 控制
 - [ ] 用户反馈机制
 
----
-
-## Version 6.0 —— 项目部署
-
-计划实现：
+## Version 6.0 —— 项目部署（计划中）
 
 - [ ] Docker
-- [ ] Linux 部署
-- [ ] 云服务器部署
+- [ ] Linux / 云服务器部署
 - [ ] API 服务化
 - [ ] 日志系统
-- [ ] 用户会话管理
-- [ ] 项目性能优化
+- [ ] 持久化用户会话管理
 - [ ] 项目正式上线
 
 ---
 
 # 项目学习目标
 
-本项目同时作为 AI Agent 应用开发实践项目，用于学习现代 LLM 应用开发中的核心技术。
-
-通过项目逐步掌握：
+本项目同时作为 AI Agent 应用开发实践项目，用于学习现代 LLM 应用开发中的核心技术：
 
 ```text
-LLM API
-   ↓
-Prompt Engineering
-   ↓
-Embedding
-   ↓
-Vector Database
-   ↓
-RAG
-   ↓
-Memory
-   ↓
-Tool Calling
-   ↓
-Agent
-   ↓
-RAG + Agent
-   ↓
-Deployment
-```
-
-最终将项目升级为一个具备：
-
-- 交易所专业知识库检索
-- RAG 问答
-- Agent 智能决策
-- Tool Calling
-- 多轮对话 Memory
-- Web 交互
-- 来源引用
-- 用户反馈
-- 可部署运行
-
-能力的完整 AI Agent 应用。
-
----
-
-# 当前项目架构总结
-
-目前项目最核心的关系是：
-
-```text
-                    User
-                     │
-                     ↓
-                Streamlit
-                  app.py
-                     │
-                     ↓
-                  Agent
-                agent.py
-                     │
-                     ↓
-                  Tools
-                tools.py
-                     │
-                     ↓
-               RAG + Memory
-                  rag.py
-                     │
-            ┌────────┴────────┐
-            ↓                 ↓
-        Retriever          Memory
-            │                 │
-            ↓                 │
-         Chroma              │
-       vector_db/             │
-            │                 │
-            ↓                 │
-      交易所文档知识库 ─────────┘
-          data/
-```
-
-各模块职责：
-
-```text
-app.py
-    ↓
-负责 Web 用户交互
-
-agent/agent.py
-    ↓
-负责 Agent 决策与工具调用
-
-agent/tools.py
-    ↓
-负责向 Agent 提供可调用工具
-
-rag.py
-    ↓
-负责 RAG 检索、LLM 问答以及当前项目的 Memory 逻辑
-
-ingest.py
-    ↓
-负责构建交易所文档知识库
-
-vector_db/
-    ↓
-保存 Chroma 向量数据
-
-data/
-    ↓
-保存交易所原始知识库文档
+LLM API → Prompt Engineering → Embedding → Vector Database
+   → RAG → 来源溯源 → Tool Calling（含实时外部接口）
+   → Agent → Memory（LangGraph）→ Web 交互 → Deployment
 ```
 
 ---

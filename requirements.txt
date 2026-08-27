@@ -1,9 +1,37 @@
-streamlit~=1.60.0
-openai~=2.51.0
-python-dotenv~=1.2.2
-modelscope~=1.39.1
-langchain-community~=0.4.2
-langchain-openai~=1.4.1
-langchain-core~=1.5.3
-langchain-text-splitters~=1.1.2
-scipy~=1.18.0
+# === LangChain 核心与生态 ===
+langchain>=0.3.0
+langchain-community>=0.3.0
+langchain-core>=0.3.0
+langchain-text-splitters>=0.3.0
+
+# === LLM 接入（DeepSeek 走 OpenAI 兼容接口）===
+langchain-openai>=0.2.0
+
+# === Embedding 模型（BGE 本地模型）===
+langchain-huggingface>=0.1.0
+sentence-transformers>=2.7.0
+
+# === 向量数据库 ===
+langchain-chroma>=0.1.4
+chromadb>=0.5.0
+
+# === Agent 与多轮对话记忆（LangGraph）===
+langgraph>=0.2.0
+
+# === 文档加载 ===
+pypdf>=4.0.0          # PyPDFLoader 依赖
+docx2txt>=0.8         # Docx2txtLoader 依赖
+
+# === Web 界面 ===
+streamlit>=1.36.0
+
+# === 网络请求（上交所 / 深交所公告接口）===
+requests>=2.31.0
+
+# === 环境变量管理 ===
+python-dotenv>=1.0.1
+
+# 提示：以上为经过验证可用的最低参考版本，而非精确锁定版本。
+# 建议在本地虚拟环境中完整安装并测试通过后，执行：
+#   pip freeze > requirements.txt
+# 以生成精确锁定版本，保证团队/部署环境一致。

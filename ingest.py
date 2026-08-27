@@ -11,29 +11,40 @@ STEP 接口文档数据处理与向量化模块
     OPENAI_API_KEY     : DeepSeek API 密钥（实际用于访问 DeepSeek 服务）
 """
 import os
-from langchain_community.document_loaders import PyPDFLoader
+from langchain_community.document_loaders import PyPDFLoader,Docx2txtLoader,TextLoader,CSVLoader
 from glob import glob
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_chroma import Chroma
-from langchain_community.embeddings import HuggingFaceBgeEmbeddings
+from langchain_huggingface import HuggingFaceEmbeddings
 from dotenv import load_dotenv
+
 
 # 加载 .env 文件
 load_dotenv()
 
 
 #读取文件
-# loader=PyPDFLoader("data/STEP.pdf")
-# documents=loader.load()
-
-pdf_dir="data"
-pdf_files=glob(os.path.join(pdf_dir,"*.pdf"))
+files_dir="data"
+all_files=glob(os.path.join(files_dir,"*"))
 all_documents=[]
 
-for pdf in pdf_files:
-    print("正在加载文档：",pdf)
-    loader=PyPDFLoader(pdf)
-    documents=loader.load()
+
+for file in all_files:
+    print("正在加载文档：",file)
+    ext=os.path.splitext(file)[1].lower()#取后缀名
+
+    if ext==".pdf":
+        documents=PyPDFLoader(file).load()
+    elif ext==".txt":
+        documents=TextLoader(file).load()
+    elif ext==".csv":
+        documents=CSVLoader(file).load()
+    elif ext==".docx":
+        documents=Docx2txtLoader(file).load()
+    else:
+        print(f"不支持的文件类型：{file}")
+        continue
+
     all_documents.extend(documents) #合并所有文档
 
 
@@ -42,7 +53,7 @@ for pdf in pdf_files:
 #print(documents[0].page_content[:500])
 
 #切割文本知识块
-slipper=RecursiveCharacterTextSplitter(chunk_size=6000,chunk_overlap=500) #每个文本块最大长度=6000，相邻两块之间重叠的字符数=500
+slipper=RecursiveCharacterTextSplitter(chunk_size=500,chunk_overlap=100) #每个文本块最大长度=500，相邻两块之间重叠的字符数=100
 
 chunks=slipper.split_documents(all_documents)
 
@@ -52,10 +63,14 @@ chunks=slipper.split_documents(all_documents)
 BASE_DIR=os.path.dirname(os.path.abspath(__file__))
 VECTOR_DB_PATH=os.path.join(BASE_DIR, "vector_db")
 
-embeddings = HuggingFaceBgeEmbeddings(
+
+os.environ["HF_HUB_OFFLINE"] = "1"
+embeddings = HuggingFaceEmbeddings(
     model_name=os.getenv("MODEL_DIR"),  # 本地路径
-    model_kwargs={'device': 'cpu'}
+    model_kwargs={'device': 'cpu'},
+    encode_kwargs={'normalize_embeddings': True},
 )
+
 
 vectorstore=Chroma.from_documents(documents=chunks,
                                   embedding=embeddings,

@@ -17,12 +17,10 @@ from langchain_chroma import Chroma
 from langchain_community.embeddings import HuggingFaceBgeEmbeddings
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-#加入memory模块
-from langchain_core.chat_history import InMemoryChatMessageHistory
-from langchain_core.runnables.history import RunnableWithMessageHistory
-
+from operator import itemgetter
 import os
 from dotenv import load_dotenv
+from pathlib import Path
 
 #代码读取.env文件
 load_dotenv()
@@ -42,11 +40,11 @@ vectorstore=Chroma(persist_directory=VECTOR_DB_PATH,embedding_function=embedding
 retriever=vectorstore.as_retriever(
     search_type="mmr",
     search_kwargs={
-        "k":20,
+        "k":5,
         "fetch_k":20,
         "lambda_mult":0.5
     }
-) #从向量数据库中找出与用户问题最相似的 20 个文本块，并返回
+) #从向量数据库中找出与用户问题最相似的 5 个文本块，初筛数量是20，相关性是0.5，并返回
 
 
 
@@ -59,16 +57,9 @@ llm = ChatOpenAI(
 
 )
 
-#创建历史记录存储,保存不同用户的聊天记录。
-store={}
-def get_session_history(session_id:str):
-    if session_id not in store:
-        store[session_id]=InMemoryChatMessageHistory()
-    return store[session_id]
 
-#文本提取
 def get_question(x):
-
+    """文本提取"""
     print("进入get_question:", x)
     if isinstance(x, dict):
         return x.get("question","")
@@ -77,8 +68,13 @@ def get_question(x):
     else:
         return str(x)
 
-#去重函数：
+def format_docs(docs):
+    """格式化文档"""
+    return "\n\n".join(doc.page_content for doc in docs)
+
+
 def dedup_context(question):
+    """去重函数"""
     docs=retriever.invoke(get_question(question))
     seen=set()
     unique=[]
@@ -89,40 +85,68 @@ def dedup_context(question):
             unique.append(doc)
     return unique
 
-#rag chain
-def create_rag_chain(question):
+def search_document_sources(question:str,k:int=5)->str:
+    """检索与问题相关的文档来源，页码和原文片段"""
+    docs=vectorstore.similarity_search(question,k=k)
+
+    results=[]
+    seen=set()
+
+    for doc in docs:
+        source=doc.metadata.get("source","未知文件")
+        file_name=Path(source).name
+
+        #PyPDFLoader的page从0开始
+        page=doc.metadata.get("page")
+        page_text=f"第{page+1}页"if page is not None else "页码未知"
+
+        #同一文件，同一页，相同片段只保留一次
+        key=(source,page,doc.page_content[:100])
+        if key in seen:
+            continue
+        seen.add(key)
+
+        excerpt=doc.page_content.strip().replace("\n","")
+        if len(excerpt)>300:
+            excerpt=excerpt[:300]+"..."
+
+        results.append(
+            f"【来源{len(results)+1}】\n"
+            f"文件：{file_name}\n"
+            f"位置：{page_text}\n"
+            f"相关原文{excerpt}"
+        )
+
+    if not results:
+        return "未在知识库中检索到与该问题相关的来源"
+
+    return "\n\n".join(results)
+
+
+def create_rag_chain():
+    """RAG CHAIN"""
     prompt=ChatPromptTemplate.from_messages([
 
         ("system","""你现在是一名金融领域的专家，根据资料回答问题.请注意：
         1.如果资料中涉及到表格，请确保读到完整的表格，有些表格是跨页的
         2.如果多个文档块包含相关信息，请综合所有信息给出完整答案
         3.如果资料中没有答案，明确说不知道"""),
-        MessagesPlaceholder(variable_name="history"),#自动处理历史消息
         ("human","资料:{context},当前问题:{question}")
        ] )
 
-
-    rag_chain=(
+    return (
         {
-        "context":lambda x:dedup_context(x),
-        "question":lambda x:get_question(x),
-        "history":lambda x:x["history"]
+        "context":lambda x:format_docs(dedup_context(x["question"])),
+        "question":itemgetter("question"),
     }|prompt|llm
     )
 
-    chain=RunnableWithMessageHistory(rag_chain,get_session_history,input_messages_key="question",history_messages_key="history")
-    return chain
+rag_chain=create_rag_chain()
 
 def rag_qa(question):
     """RAG问答函数，直接返回答案字符串"""
-    chain=create_rag_chain(question)
-    result=chain.invoke(
-        {"question":question},
-        config={"configurable":{"session_id":"default_user"}}
-    )
-    return result.content
+    return rag_chain.invoke({"question":question}).content
 
 # answer=chain.invoke( {"question": "目前支持互联网交易平台的哪些业务？"},
-#     config={"configurable": {"session_id": "default_user"}} )
 # print(answer.content)
 

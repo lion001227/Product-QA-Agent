@@ -16,6 +16,7 @@
 """
 import streamlit as st
 import os
+import uuid
 
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
@@ -29,9 +30,12 @@ st.set_page_config(
 
 st.title("💬 交易所文档读取 QA 助手")
 
-# 初始化聊天记录
+# 初始化聊天记录,同时创建唯一的agent会话id
 if "messages" not in st.session_state:
     st.session_state.messages = []
+
+if "thread_id" not in st.session_state:
+    st.session_state.thread_id = str(uuid.uuid4())
 
 # 显示聊天历史
 for msg in st.session_state.messages:
@@ -53,7 +57,7 @@ if question := st.chat_input("请输入您的问题..."):
     with st.chat_message("assistant"):
         with st.spinner("思考中..."):
             try:
-                answer = ask_agent(question)
+                answer = ask_agent(question,st.session_state.thread_id)
             except Exception as e:
                 answer = f"❌ 处理请求时出错：{str(e)}"
 
@@ -69,7 +73,7 @@ if question := st.chat_input("请输入您的问题..."):
 with st.sidebar:
     st.markdown("## 📚 关于助手")
     st.markdown("""
-    这是一个基于 **RAG (检索增强生成)** 技术的文档问答助手。
+    这是一个基于 **RAG** 技术的文档问答助手。
     
     ### 功能特点：
     - 📄 读取交易所相关文档
@@ -82,6 +86,7 @@ with st.sidebar:
 
     if st.button("🗑️ 清空对话"):
         st.session_state.messages = []
+        st.session_state.thread_id = str(uuid.uuid4())
         st.rerun()
 
     st.markdown("---")
