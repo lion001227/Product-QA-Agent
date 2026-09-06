@@ -1,6 +1,6 @@
 from langchain.tools import tool
 import requests
-from datetime import datetime, timedelta
+from datetime import datetime
 import random
 import json
 

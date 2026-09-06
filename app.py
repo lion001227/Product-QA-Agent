@@ -20,15 +20,15 @@ import uuid
 
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
-from agent.agent import ask_agent
+from agent.agent import stream_agent
 
 st.set_page_config(
     page_title="交易所文档QA助手",
-    page_icon="💬",
+    page_icon="🥺",
     layout="wide"
 )
 
-st.title("💬 交易所文档读取 QA 助手")
+st.title("😊交易所文档读取 QA 助手")
 
 # 初始化聊天记录,同时创建唯一的agent会话id
 if "messages" not in st.session_state:
@@ -57,11 +57,14 @@ if question := st.chat_input("请输入您的问题..."):
     with st.chat_message("assistant"):
         with st.spinner("思考中..."):
             try:
-                answer = ask_agent(question,st.session_state.thread_id)
+                # write_stream 会消费生成器并返回完整文本；保存文本而不是生成器，
+                # 页面下次重跑时历史回复才能再次被渲染。
+                answer = st.write_stream(
+                    stream_agent(question, st.session_state.thread_id)
+                )
             except Exception as e:
                 answer = f"❌ 处理请求时出错：{str(e)}"
-
-        st.write(answer)
+                st.write(answer)
 
     # 保存助手回复
     st.session_state.messages.append({
@@ -71,23 +74,23 @@ if question := st.chat_input("请输入您的问题..."):
 
 # 侧边栏信息
 with st.sidebar:
-    st.markdown("## 📚 关于助手")
+    st.markdown("## 😎关于助手")
     st.markdown("""
     这是一个基于 **RAG** 技术的文档问答助手。
     
-    ### 功能特点：
-    - 📄 读取交易所相关文档
-    - 🔍 智能检索相关内容
-    - 💡 基于上下文生成回答
+    ### 功能：
+    - 读取交易所相关文档
+    - 追溯交易所文档相关段落的来源 
+    - 读取深交所，上交所公告
     
     ### 使用说明：
     直接在输入框输入问题，按回车发送
     """)
 
-    if st.button("🗑️ 清空对话"):
+    if st.button("🫠清空对话"):
         st.session_state.messages = []
         st.session_state.thread_id = str(uuid.uuid4())
         st.rerun()
 
     st.markdown("---")
-    st.caption("💡 提示：问题越具体，回答越精准")
+    st.caption("🤓提示：问题越具体，回答越精准")

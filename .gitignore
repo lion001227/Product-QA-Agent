@@ -15,5 +15,7 @@ data/
 models
 1.py
 test_model.py
-
+langgraph_checkpoints.sqlite
+langgraph_checkpoints.sqlite-shm
+langgraph_checkpoints.sqlite-wal
 
