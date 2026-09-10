@@ -1,21 +1,23 @@
 """
-交易所文档 QA 智能体 —— 手写 LangGraph StateGraph 版本
+交易所文档 QA 智能体 —— Supervisor 多 Agent LangGraph 实现
 
-原来用 langchain.agents.create_agent 隐式搭好了一个 ReAct 循环。
-这里改成显式的图结构，方便以后自己控制路由逻辑
-（比如加限流、加日志节点、给某些问题强制走某个工具、加人工确认节点等）。
+图由一个 supervisor 和三个专职 agent 组成。supervisor 根据最新的用户问题
+选择 rag、source 或 announcement；每个专职 agent 都只绑定自己可用的工具，
+避免将文档检索、来源追溯和交易所公告查询混在同一组工具中。
 
 图结构：
-    START -> agent --(有工具调用)--> tools -> agent -> ...
-                  --(没有工具调用)--> END
+    START -> supervisor -> rag ----------(需要工具)--> rag_tools ----------┐
+                          source -------(需要工具)--> source_tools -------┼-> 对应 agent
+                          announcement -(需要工具)--> announcement_tools -┘
+                          任一专职 agent --(无需工具)--> END
 
-    agent 节点：LLM 结合历史消息 + 系统提示词，决定直接回答还是调用某个工具
-    tools 节点：执行 agent 节点请求的工具调用，把结果作为 ToolMessage 加回消息列表
+    supervisor：只负责路由，不直接面向用户回答。
+    专职 agent：结合历史消息决定回答或发起结构化 tool call。
+    ToolNode：执行工具，并将 ToolMessage 追加回 messages，供对应 agent 生成最终答复。
 
 多轮对话：
-    用 SqliteSaver 做 checkpointer，相同的 thread_id 代表同一段对话，
-    LangGraph 会自动读取此前的消息历史，本轮结束后再把新消息追加保存回去，重启程序后之前的对话仍能保留
-    （用法和旧版 create_agent 完全一致，thread_id 语义不变）。
+    SqliteSaver 以 thread_id 为键保存图状态。同一 thread_id 会自动读取既有
+    messages，并在本轮完成后持久化新增消息；应用重启后仍可继续该会话。
 """
 
 import os
@@ -34,89 +36,151 @@ from langchain_core.messages import AIMessageChunk
 
 load_dotenv()
 
-SYSTEM_PROMPT=system_prompt="""
-你现在是一个金融交易所文档的QA智能助手，你会收到完整的历史对话，结合历史理解用户提问的问题，明白上下文的指代关系。
-1.当用户询问交易所文档中的内容时，必须调用profile_search，
-调用工具前，请把当前问题改写成不依赖上下文，含明确实体名称的完整问题
-例如：
-历史：用户询问“上海报价回购业务是什么”
-当前：用户问“它适用于哪些客户”
-调用工具时应查询：“上海报价回购业务适用于哪些客户？”
-
-2.当用户询问问题依据、来源文件、原文内容或页码时，调用return_document_sources.
-如果用户使用“这个答案”“他的来源”等指代,
-先根据历史对话把问题改写成包含明确业务名称的完整问题，再调用return_document_sources,
-调用 return_document_sources 后，必须逐字保留工具返回的全部内容，
-直接作为最终回答输出。
-不得自行改写工具返回结果，不得增加“来源依据”“原文内容”等标题，
-不得省略“文件”“位置”“相关原文”字段。
-即使位置显示为“页码未知”，也必须原样输出。
-
-例如：
-用户：上海报价回购是什么业务？
-助手：……（调用 profile_search）
-用户：这个回答的依据在哪？
-助手：……（调用 document_source_search）
-【来源 1】
-文件：新一代Win版上海报价回购操作说明.docx
-位置：页码未知
-相关原文：……
-
-3.当用户询问上交所最新公告、近期公告、今日公告，
-或某个关键词相关的最新官方公告时，必须调用 sse_latest_announcements。
-当用户明确指定上交所时，只调用sse_latest_announcements，当用户明确指定深交所时，只调用szse_latest_announcements
-不能混用两个交易所的公告结果
-
-该工具返回的是实时官网信息。
-回答时必须保留公告发布日期和官网链接，
-不得把实时公告内容当作本地知识库资料，
-也不得编造未在工具结果中的公告。
-
-不要在没有查询交易所文档资料的情况下编造信息
-需要调用工具时，必须发起结构化 tool call。
-不得向用户输出“我将调用某工具”“让我调用工具”等过程说明。
-工具返回后，再基于工具结果给出最终答案。
-    """
-
-tools=[profile_search,return_document_sources,sse_latest_announcements,szse_latest_announcements]
 llm=ChatOpenAI(
     model="deepseek-chat",
     base_url="https://api.deepseek.com/v1",
     temperature=0.0,
     api_key=os.getenv("OPENAI_API_KEY")
-).bind_tools(tools)
+)
 
 class AgentState(TypedDict):
     """agent 图的状态：只需要维护消息列表，add_messages 会自动做增量合并
         （新消息追加到历史后面，而不是整体覆盖）"""
     messages: Annotated[Sequence[BaseMessage],add_messages]
+    next:str
 
-def call_model(state:AgentState)->dict:
-    """agent节点：读取历史信息+系统提示词，决定直接回答还是发起工具调用"""
-    messages=[SystemMessage(content=system_prompt),*state["messages"]]
-    response=llm.invoke(messages)
-    # print(messages)
+supervisor_prompt="""
+你是一个任务路由器，需要判断用户的问题应该交给哪个agent。
+可选agent：
+1. rag
+处理交易所文档知识库相关问题，例如：
+- 业务规则
+- 交易规则
+- 业务定义
+- 制度说明
+- 文档内容
+
+2. source
+处理文档来源、依据、出处相关问题，例如：
+- 这个答案来自哪个文件？
+- 依据是什么？
+- 原文在哪里？
+- 第几页？
+- 给我相关原文
+
+3. announcement
+处理交易所最新公告，例如：
+- 上交所最新公告
+- 深交所最新公告
+- 某股票最新公告
+
+只返回一个单词：
+
+rag
+source
+announcement
+"""
+
+def supervisor_agent(state:AgentState):
+    """supervisor节点：判断交给哪个agent处理"""
+    response=llm.invoke([SystemMessage(content=supervisor_prompt),state["messages"][-1]])
+    route=response.content.strip().lower()
+    return {"next":route}
+
+rag_prompt="""
+你是交易所文档知识库 Agent。
+
+你的任务是回答用户关于交易所业务、规则、制度和文档内容的问题。
+
+如果需要查询知识库，必须调用 profile_search。
+
+如果用户的问题依赖之前的对话，请结合历史上下文理解问题。
+
+不要编造知识库中不存在的信息。
+"""
+
+rag_llm=llm.bind_tools([profile_search])
+
+def rag_agent(state:AgentState):
+    """RAG Agent"""
+    response=rag_llm.invoke([SystemMessage(content=rag_prompt),*state["messages"]])
+    # ToolNode 和 add_messages 都约定使用 messages。若写成 message，
+    # ToolNode 会把最后一条用户消息误当作工具调用请求并报错。
     return {"messages":[response]}
+rag_tools=ToolNode([profile_search])
 
-# def should_continue(state:AgentState)->str:
-#     """条件路由：判断agent节点是否带有工具调用请求"""
-#     last_message=state["messages"][-1]
-#     if getattr(last_message,"tool_calls",None):
-#         return "tools"
-#     return END
+source_prompt="""
+你是文档来源查询 Agent。
+
+你的任务是查询交易所知识库中的：
+- 文件来源
+- 页码
+- 相关原文
+- 文档依据
+
+必须调用 return_document_sources。
+
+Tool 返回的内容应该直接返回给用户，不要修改。
+"""
+source_llm=llm.bind_tools([return_document_sources])
+def source_agent(state:AgentState):
+    """Source Agent"""
+    response=source_llm.invoke([SystemMessage(content=source_prompt),*state["messages"]])
+    return {"messages":[response]}
+source_tools=ToolNode([return_document_sources])
+
+announcement_prompt="""
+你是交易所公告查询 Agent。
+
+你的任务是查询交易所最新公告。
+
+如果用户明确说：
+- 上交所 → 调用 sse_latest_announcements
+- 深交所 → 调用 szse_latest_announcements
+
+不要混用两个交易所。
+
+如果用户没有明确指定交易所，根据上下文判断。
+"""
+announcement_llm=llm.bind_tools([sse_latest_announcements,szse_latest_announcements])
+def announcement_agent(state:AgentState):
+    """Announcement Agent"""
+    response=announcement_llm.invoke([SystemMessage(content=announcement_prompt),*state["messages"]])
+    return {"messages":[response]}
+announcement_tools=ToolNode([sse_latest_announcements,szse_latest_announcements])
+
+def supervisor_router(state:AgentState):
+    return state["next"]
 
 def build_agent_graph()->StateGraph:
     graph=StateGraph(AgentState)
-    graph.add_node("agent",call_model)
-    graph.add_node("tools",ToolNode(tools))
+    graph.add_node("supervisor",supervisor_agent)
+    graph.add_node("rag",rag_agent)
+    graph.add_node("source",source_agent)
+    graph.add_node("announcement",announcement_agent)
+    graph.add_node("rag_tools", rag_tools)
+    graph.add_node("source_tools", source_tools)
+    graph.add_node("announcement_tools", announcement_tools)
 
-    graph.add_edge(START,"agent")
+    graph.add_edge(START,"supervisor")
     graph.add_conditional_edges(
-        "agent",
-        tools_condition,
-        {"tools":"tools",END:END})
-    #工具执行完之后回到agent节点，让llm看工具结果，决定是否继续调用或直接回答
-    graph.add_edge("tools","agent")
+        "supervisor",
+        supervisor_router,
+        {"rag":"rag",
+                  "source":"source",
+                  "announcement":"announcement"
+                  })
+    # 只有模型实际发出了 tool_call 才进入 ToolNode；工具结果再交回
+    # 对应 agent，由模型组织最终答复。没有 tool_call 时直接结束。
+    graph.add_conditional_edges("rag", tools_condition, {"tools": "rag_tools", END: END})
+    graph.add_edge("rag_tools", "rag")
+    graph.add_conditional_edges("source", tools_condition, {"tools": "source_tools", END: END})
+    graph.add_edge("source_tools", "source")
+    graph.add_conditional_edges(
+        "announcement", tools_condition, {"tools": "announcement_tools", END: END}
+    )
+    graph.add_edge("announcement_tools", "announcement")
+
 
     return graph
 
@@ -131,25 +195,6 @@ checkpointer.setup()
 
 agent=build_agent_graph().compile(checkpointer=checkpointer)
 
-
-# def ask_agent(question:str,thread_id:str):
-#     result=agent.invoke({
-#         "messages":[
-#             {
-#                 "role":"user",
-#                 "content":question
-#             }
-#         ]
-#     },
-#     config={
-#         "configurable":
-#             {
-#                 "thread_id":thread_id  #相同的thread_id代表同一段对话，langchain会自动读取此前信息，再将本轮回答保存回去
-#             }
-#     })
-#     return result["messages"][-1].content
-
-
 def stream_agent(question:str,thread_id:str):
     """流式输出"""
     config={"configurable":{"thread_id":thread_id }}
@@ -158,7 +203,9 @@ def stream_agent(question:str,thread_id:str):
         config=config,
         stream_mode="messages"
     ):
-        is_agent_response = metadata.get("langgraph_node") == "agent"
+        is_agent_response = metadata.get("langgraph_node") in {
+            "rag", "source", "announcement"
+        }
         is_ai_chunk = isinstance(token, AIMessageChunk)
         if is_agent_response and is_ai_chunk and token.content:
             yield token.content

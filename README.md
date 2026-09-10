@@ -7,7 +7,7 @@
 - 读取 `data/` 中的 PDF、TXT、CSV、DOCX 文档，构建 Chroma 向量库。
 - 使用 MMR 检索，并对相近文本块去重。
 - 通过 LangGraph RAG 图执行“检索 → 资料充分性判断 → 查询改写（最多三次检索）→ 回答生成”。
-- 由 Agent 根据问题调用知识库问答、来源追溯、上交所公告或深交所公告工具。
+- 由 Supervisor 根据问题路由到知识库问答、来源追溯或交易所公告专职 Agent。
 - 返回来源文件名、页码和原文片段。
 - 使用 SQLite checkpoint 按 `thread_id` 保存会话；应用重启后对话状态仍可恢复。
 - Streamlit 聊天界面以流式方式展示回答，并支持清空当前会话。
@@ -18,12 +18,14 @@
 Streamlit（app.py）
         │ stream_agent(question, thread_id)
         ▼
-LangGraph Agent（agent/agent.py）── SQLite checkpoint
+LangGraph 多 Agent 图（agent/agent.py）── SQLite checkpoint
         │
-        ├── profile_search ───────────────┐
-        ├── return_document_sources ──────┼── RAG 图（rag.py）── Chroma（vector_db/）
-        ├── sse_latest_announcements ─────┼── 上交所官网实时接口
-        └── szse_latest_announcements ────┴── 深交所官网实时接口
+        ▼
+Supervisor（仅负责路由）
+        ├── rag Agent ─────────── profile_search ──────────────┐
+        ├── source Agent ──────── return_document_sources ─────┼── RAG 图（rag.py）── Chroma（vector_db/）
+        └── announcement Agent ── sse_latest_announcements ────┼── 上交所官网实时接口
+                                  szse_latest_announcements ────┴── 深交所官网实时接口
 ```
 
 ## 项目结构
@@ -31,7 +33,7 @@ LangGraph Agent（agent/agent.py）── SQLite checkpoint
 ```text
 Product-QA-Agent/
 ├── agent/
-│   ├── agent.py          # 手写 LangGraph Agent、工具循环、SQLite 会话记忆与流式输出
+│   ├── agent.py          # Supervisor 多 Agent 图、专属工具循环、SQLite 会话记忆与流式输出
 │   └── tools.py          # RAG、来源追溯、上交所和深交所公告工具
 ├── data/                 # 待索引的知识库文档（本地目录，不提交）
 ├── models/               # 本地 BGE 模型目录（不提交）
@@ -106,9 +108,11 @@ streamlit run app.py
 
 ## 使用说明
 
-- 文档内容问题会触发本地知识库检索。
-- 询问“来源、依据、原文或第几页”会返回相关文件、页码与原文片段。
-- 明确询问上交所或深交所的最新/近期公告时，Agent 会调用对应官网接口；公告数据为实时数据，不来自本地向量库。
+- Supervisor 会根据当前问题路由到一个专职 Agent；它不会直接生成最终答案。
+- 文档内容、业务规则或制度问题由 rag Agent 处理，并通过本地知识库检索回答。
+- 询问“来源、依据、原文或第几页”由 source Agent 处理，返回相关文件、页码与原文片段。
+- 明确询问上交所或深交所的最新/近期公告时，由 announcement Agent 调用对应官网接口；公告数据为实时数据，不来自本地向量库。
+- 各专职 Agent 只有对应工具可用。模型发出工具调用时，LangGraph 执行工具后将结果交回同一个 Agent 生成答复；不需要工具时直接结束。
 - 每个浏览器会话对应一个 `thread_id`。侧边栏的“清空对话”会生成新的会话 ID；旧会话仍保存在 SQLite 文件中。
 
 ## 依赖说明
