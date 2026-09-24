@@ -24,7 +24,7 @@ load_dotenv()
 
 
 #读取文件
-files_dir="data"
+files_dir= "../data"
 all_files=glob(os.path.join(files_dir,"*"))
 all_documents=[]
 
@@ -61,7 +61,7 @@ chunks=slipper.split_documents(all_documents)
 
 #创建向量数据库，模型下载到了本地，配置本地路径，数据库用绝对路径
 BASE_DIR=os.path.dirname(os.path.abspath(__file__))
-VECTOR_DB_PATH=os.path.join(BASE_DIR, "vector_db")
+VECTOR_DB_PATH=os.path.join(BASE_DIR, "../vector_db")
 
 
 os.environ["HF_HUB_OFFLINE"] = "1"

@@ -41,7 +41,7 @@ load_dotenv()
 
 #创建检索，模型用本地路径下的模型，数据库用绝对路径
 BASE_DIR=os.path.dirname(os.path.abspath(__file__))
-VECTOR_DB_PATH=os.path.join(BASE_DIR, "vector_db")
+VECTOR_DB_PATH=os.path.join(BASE_DIR, "../vector_db")
 
 embeddings = HuggingFaceBgeEmbeddings(
     model_name=os.getenv("MODEL_DIR"),  # 本地路径
@@ -116,6 +116,18 @@ def retrieve_node(state:RAGState)->dict:
         "context":format_docs(unique),
         "retrieval_count":state.get("retrieval_count",0)+1,
             }
+
+def retrieve_for_evaluation(question):
+    """返回检索文档供评估文档精确度"""
+    docs = retriever.invoke(question)
+    seen = set()
+    unique = []
+    for doc in docs:
+        key = doc.page_content[:80]
+        if key not in seen:
+            seen.add(key)
+            unique.append(doc)
+    return unique
 
 def grade_node(state:RAGState)->dict:
     prompt=f"""判断以下资料是否足以回答用户的问题。

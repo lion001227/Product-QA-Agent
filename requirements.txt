@@ -13,7 +13,7 @@ langgraph-checkpoint-sqlite>=2.0.0
 chromadb>=0.5.0
 sentence-transformers>=2.7.0
 
-# 文档加载
+# 文档加载（rag/ingest.py）
 pypdf>=4.0.0
 docx2txt>=0.8
 
@@ -21,8 +21,9 @@ docx2txt>=0.8
 streamlit>=1.36.0
 python-dotenv>=1.0.1
 
-# 交易所公告接口
+# 交易所公告接口（agent/tools.py）
 requests>=2.31.0
 
-# 可选：运行 1.py 下载本地 BGE 模型时需要
+# 可选：本地运行 1.py 从 ModelScope 下载 BGE 模型时需要
+# 评估脚本 evaluation/ 不引入额外第三方依赖
 modelscope>=1.18.0

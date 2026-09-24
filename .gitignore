@@ -14,6 +14,8 @@ vector_db/
 data/
 models
 1.py
+results.json
+summary.json
 test_model.py
 langgraph_checkpoints.sqlite
 langgraph_checkpoints.sqlite-shm
