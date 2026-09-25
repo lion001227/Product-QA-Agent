@@ -1,17 +1,17 @@
 # 交易所文档 QA Agent
 
-一个面向交易所文档的智能问答应用。项目结合本地 BGE 向量检索、DeepSeek（OpenAI 兼容接口）、LangGraph 和 Streamlit，支持文档问答、答案来源追溯、上交所/深交所实时公告查询，跨重启保留的多轮对话，以及基于测试集的 Agent 评估。
+面向交易所文档的智能问答应用。项目结合本地 BGE 向量检索、DeepSeek（OpenAI 兼容接口）、LangGraph 和 Streamlit，支持知识库问答、答案来源追溯、上交所/深交所实时公告查询、跨重启保留的多轮对话，以及基于测试集的 Agent 评估。
 
 ## 功能
 
-- 读取 `data/` 中的 PDF、TXT、CSV、DOCX 文档，构建 Chroma 向量库。
+- 读取 `data/` 中的 PDF、TXT、CSV、DOCX，构建 Chroma 向量库。
 - 使用 MMR 检索，并对相近文本块去重。
-- 通过 LangGraph RAG 图执行“检索 → 资料充分性判断 → 查询改写（最多三次检索）→ 回答生成”。
-- 由 Supervisor 根据问题路由到知识库问答、来源追溯或交易所公告专职 Agent。
-- 返回来源文件名、页码和原文片段。
-- 使用 SQLite checkpoint 按 `thread_id` 保存会话；应用重启后对话状态仍可恢复。
+- 通过 LangGraph RAG 图执行「检索 → 资料充分性判断 → 查询改写（最多三次检索）→ 回答生成」。
+- Supervisor 按问题路由到知识库问答、来源追溯或交易所公告专职 Agent。
+- 返回答案对应的来源文件名、页码和原文片段。
+- 使用 SQLite checkpoint 按 `thread_id` 保存会话，应用重启后可恢复对话状态。
 - Streamlit 聊天界面以流式方式展示回答，并支持清空当前会话。
-- 提供评估脚本：对测试问题统计工具选择正确率、回答正确率、检索相关度、延迟、token 用量和失败率。
+- 评估脚本对测试问题统计工具选择正确率、回答正确率、检索相关度、延迟、token 用量和失败率。
 
 ## 架构
 
@@ -29,17 +29,17 @@ Supervisor（仅负责路由）
                                   szse_latest_announcements ────┴── 深交所官网实时接口
 ```
 
-评估入口 `evaluation/evaluate.py` 直接调用编译后的 Agent 图，并对 rag/source 类问题通过 `retrieve_for_evaluation` 取出检索文档用于相关性打分。
+评估入口 `evaluation/evaluate.py` 直接调用编译后的 Agent 图；对 rag / source 类问题通过 `retrieve_for_evaluation` 取出检索文档，用于相关性打分。
 
 ## 项目结构
 
 ```text
 Product-QA-Agent/
 ├── agent/
-│   ├── agent.py          # Supervisor 多 Agent 图、专属工具循环、SQLite 会话记忆与流式输出
+│   ├── agent.py          # Supervisor 多 Agent 图、工具循环、SQLite 会话记忆与流式输出
 │   └── tools.py          # RAG、来源追溯、上交所和深交所公告工具
 ├── rag/
-│   ├── ingest.py         # 文档加载、切分和向量库构建脚本
+│   ├── ingest.py         # 文档加载、切分和向量库构建
 │   └── rag.py            # RAG StateGraph、检索、改写、回答、来源追溯与评估检索接口
 ├── evaluation/
 │   ├── dataset.py        # 评估测试集
@@ -50,19 +50,22 @@ Product-QA-Agent/
 ├── models/               # 本地 BGE 模型目录（不提交）
 ├── vector_db/            # Chroma 持久化数据（由 rag/ingest.py 生成，不提交）
 ├── app.py                # Streamlit 应用入口
+├── Dockerfile            # 应用镜像：安装依赖并以 Streamlit 启动 app.py
+├── docker-compose.yml    # 编排服务：映射 8501，挂载 models / vector_db / data 与 SQLite
 ├── requirements.txt
-└── .env
+├── .env                  # 本地运行配置（不提交）
+└── .env.docker           # docker运行配置（不提交）
 ```
 
 运行时会在项目根目录创建 `langgraph_checkpoints.sqlite` 及其 SQLite 辅助文件，用于保存聊天状态。不要手动删除它们，除非确认要清除所有已持久化的会话。
 
-评估脚本会在当前工作目录写出 `results.json` 和 `summary.json`（已被 `.gitignore` 排除）。
+评估脚本会在当前工作目录写出 `results.json` 和 `summary.json`。
 
 ## 环境要求
 
-- Python 3.10 或更高版本
+- Python 3.10 或更高版本（Docker 镜像使用 Python 3.11）
 - 可访问 DeepSeek API
-- 本地可用的 BGE embedding 模型
+- 本地可用的 BGE embedding 模型（路径由 `MODEL_DIR` 指定）
 
 ## 安装与配置
 
@@ -93,6 +96,7 @@ MODEL_DIR=D:/path/to/bge-small-zh-v1.5
 
 `OPENAI_API_KEY` 用于访问 DeepSeek；程序已在代码中指定 `https://api.deepseek.com/v1` 和 `deepseek-chat`。`MODEL_DIR` 必须指向本地 BGE 模型目录。Windows 路径建议使用正斜杠。
 
+Docker 部署额外使用 `.env.docker`。容器内模型通过挂载访问，`MODEL_DIR` 应写成容器路径，例如 `/app/models/bge-small-zh-v1.5`。
 
 ## 构建知识库
 
@@ -115,16 +119,26 @@ python ingest.py
 streamlit run app.py
 ```
 
-打开 Streamlit 显示的本地地址后即可提问。不要使用 `python app.py` 启动，因为它是 Streamlit 应用入口。
+打开 Streamlit 显示的本地地址后即可提问。不要使用 `python app.py` 启动。
+
+### 使用 Docker Compose
+
+先准备好本地 `models/`、`vector_db/`、`data/` 以及 `.env.docker`，然后在项目根目录执行：
+
+```bash
+docker compose up --build
+```
+
+服务映射到本机 `8501`。`models`、`vector_db`、`data` 和 SQLite checkpoint 通过 volume 挂载进容器，不会打进镜像。
 
 ## 使用说明
 
-- Supervisor 会根据当前问题路由到一个专职 Agent；它不会直接生成最终答案。
-- 文档内容、业务规则或制度问题由 rag Agent 处理，并通过本地知识库检索回答。
-- 询问“来源、依据、原文或第几页”由 source Agent 处理，返回相关文件、页码与原文片段。
-- 明确询问上交所或深交所的最新/近期公告时，由 announcement Agent 调用对应官网接口；公告数据为实时数据，不来自本地向量库。
+- Supervisor 根据当前问题路由到一个专职 Agent，不会直接生成最终答案。
+- 文档内容、业务规则或制度问题由 rag Agent 处理，通过本地知识库检索回答。
+- 询问「来源、依据、原文或第几页」由 source Agent 处理，返回相关文件、页码与原文片段。
+- 明确询问上交所或深交所的最新/近期公告时，由 announcement Agent 调用对应官网接口；公告为实时数据，不来自本地向量库。
 - 各专职 Agent 只有对应工具可用。模型发出工具调用时，LangGraph 执行工具后将结果交回同一个 Agent 生成答复；不需要工具时直接结束。
-- 每个浏览器会话对应一个 `thread_id`。侧边栏的“清空对话”会生成新的会话 ID；旧会话仍保存在 SQLite 文件中。
+- 每个浏览器会话对应一个 `thread_id`。侧边栏的「清空对话」会生成新的会话 ID；旧会话仍保存在 SQLite 文件中。
 
 ## 评估
 
@@ -140,7 +154,7 @@ python -m evaluation.evaluate
 - 工具选择正确率
 - 回答正确率（由 DeepSeek 按标准答案裁判）
 - 平均 token 用量（输入 / 输出 / 合计）
-- rag/source 问题的检索相关度
+- rag / source 问题的检索相关度
 - 失败率
 
 结果写入当前目录的 `results.json` 和 `summary.json`。可用下列命令再次查看：
@@ -153,11 +167,11 @@ python -m evaluation.results
 
 ## 依赖说明
 
-`requirements.txt` 为运行当前代码所需的最低版本范围。其中 `modelscope` 仅供本地 `1.py` 下载模型使用；`evaluation/` 复用现有 LangChain / LangGraph / DeepSeek 依赖，无额外第三方包。若要获得可复现的部署环境，请在已验证可用的虚拟环境中执行 `pip freeze > requirements.lock.txt`，并在部署时使用该锁定文件。
+`requirements.txt` 为运行当前代码所需的最低版本范围。`evaluation/` 复用现有 LangChain / LangGraph / DeepSeek 依赖，无额外第三方包。若要获得可复现的部署环境，可在已验证可用的虚拟环境中执行 `pip freeze > requirements.lock.txt`，部署时使用该锁定文件。
 
 ## 注意事项
 
-- `.env` 包含密钥，切勿提交到版本库。
+- `.env` 与 `.env.docker` 包含密钥，切勿提交到版本库。
 - `data/`、`models/` 和 `vector_db/` 都是本地资产，当前被 `.gitignore` 排除。
 - 应用启动时会加载本地 embedding 模型；首次加载可能较慢。
 - SQLite checkpoint 文件包含对话内容，分享或清理项目前请按敏感数据处理。

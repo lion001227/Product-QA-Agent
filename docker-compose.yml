@@ -1,0 +1,16 @@
+services:
+  product-qa-agent:
+    build: .
+    container_name: product-qa-agent
+
+    ports:
+      - "8501:8501"
+
+    env_file:
+      - .env.docker
+    volumes:
+      - ./models:/app/models
+      - ./vector_db:/app/vector_db
+      - ./data:/app/data
+      - ./langgraph_checkpoints.sqlite:/app/langgraph_checkpoints.sqlite
+      - ./evaluation/langgraph_checkpoints.sqlite:/app/evaluation/langgraph_checkpoints.sqlite

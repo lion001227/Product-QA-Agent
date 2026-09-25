@@ -10,6 +10,8 @@ __pycache__/
 *.py[cod]
 
 .env
+.env.docker
+.dockerignore
 vector_db/
 data/
 models
