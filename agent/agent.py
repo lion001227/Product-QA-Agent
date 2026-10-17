@@ -107,7 +107,7 @@ def rag_agent(state:AgentState):
     # ToolNode 和 add_messages 都约定使用 messages。若写成 message，
     # ToolNode 会把最后一条用户消息误当作工具调用请求并报错。
     return {"messages":[response]}
-rag_tools=ToolNode([profile_search])
+rag_tools=ToolNode([profile_search],handle_tool_errors=lambda error:"知识库查询暂时失败，请稍后再试")
 
 source_prompt="""
 你是文档来源查询 Agent。
@@ -127,7 +127,7 @@ def source_agent(state:AgentState):
     """Source Agent"""
     response=source_llm.invoke([SystemMessage(content=source_prompt),*state["messages"]])
     return {"messages":[response]}
-source_tools=ToolNode([return_document_sources])
+source_tools=ToolNode([return_document_sources],handle_tool_errors=lambda error:"文档来源查询暂时失败，请稍后重试")
 
 announcement_prompt="""
 你是交易所公告查询 Agent。
